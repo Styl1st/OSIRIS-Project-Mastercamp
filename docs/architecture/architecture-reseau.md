@@ -64,4 +64,10 @@ graph TB
 |---|---|---|
 | vCPU | 4 | 4–8 |
 | RAM | 8 Go | 8–16 Go |
-| Disque | 50 Go | 10
+| Disque | 50 Go | 100 Go (rétention 90 j) |
+
+## Snapshots VMware (vivement conseillé)
+
+1. `01-ubuntu-clean` — juste après install Ubuntu + IP statique
+2. `02-wazuh-installed` — après install Wazuh validée
+3. `03-agents-connected` — après enrôlement des premiers agents

@@ -1,0 +1,80 @@
+<!-- =========================================================================
+  local_rules.xml — Règles custom OSIRIS (point de départ, rôle Détection & Règles)
+  Déployer sur le serveur : /var/ossec/etc/rules/local_rules.xml
+  puis : sudo systemctl restart wazuh-manager
+  Test : sudo /var/ossec/bin/wazuh-logtest
+  IDs custom : 100000+ obligatoirement.
+========================================================================== -->
+
+<group name="local,osiris,">
+
+  <!-- ============ USE CASE 1 : Brute-force ============ -->
+
+  <!-- SSH : 8 échecs d'authentification en 120 s depuis la même source -->
+  <rule id="100100" level="10" frequency="8" timeframe="120">
+    <if_matched_sid>5716</if_matched_sid>
+    <same_source_ip />
+    <description>OSIRIS : brute-force SSH détecté depuis $(srcip)</description>
+    <mitre><id>T1110</id></mitre>
+    <group>authentication_failures,brute_force,pci_dss_11.4,gdpr_IV_35.7.d,</group>
+  </rule>
+
+  <!-- Windows : 8 échecs de connexion (event 4625) en 120 s -->
+  <rule id="100101" level="10" frequency="8" timeframe="120">
+    <if_matched_sid>60122</if_matched_sid>
+    <description>OSIRIS : brute-force Windows (échecs de connexion répétés)</description>
+    <mitre><id>T1110</id></mitre>
+    <group>authentication_failures,brute_force,</group>
+  </rule>
+
+  <!-- ============ USE CASE 2 : FIM critique ============ -->
+
+  <!-- Modification de fichiers d'authentification sensibles -->
+  <rule id="100110" level="12">
+    <if_sid>550,553,554</if_sid>
+    <field name="file">/etc/passwd|/etc/shadow|/etc/sudoers</field>
+    <description>OSIRIS : fichier d'authentification critique modifié : $(file)</description>
+    <mitre><id>T1098</id><id>T1565.001</id></mitre>
+    <group>syscheck,fim_critical,pci_dss_11.5,gdpr_II_5.1.f,</group>
+  </rule>
+
+  <!-- Modification de clés SSH -->
+  <rule id="100111" level="10">
+    <if_sid>550,553,554</if_sid>
+    <field name="file">.ssh/authorized_keys</field>
+    <description>OSIRIS : authorized_keys modifié — persistance possible : $(file)</description>
+    <mitre><id>T1098.004</id></mitre>
+    <group>syscheck,fim_critical,</group>
+  </rule>
+
+  <!-- ============ USE CASE 3 : Processus suspects ============ -->
+
+  <!-- Linux : outils offensifs vus dans la liste de processus (full_command "process list") -->
+  <rule id="100120" level="10">
+    <if_sid>530</if_sid>
+    <match>ossec: output: 'process list'</match>
+    <regex>nc -l|ncat|socat|/tmp/.*\.sh|minerd|xmrig</regex>
+    <description>OSIRIS : processus suspect détecté sur $(hostname)</description>
+    <mitre><id>T1059</id></mitre>
+    <group>process_monitoring,suspicious_process,</group>
+  </rule>
+
+  <!-- Windows/Sysmon : exécution d'outils d'attaque connus (event 1 - process creation) -->
+  <rule id="100121" level="12">
+    <if_group>sysmon_event1</if_group>
+    <field name="win.eventdata.image" type="pcre2">(?i)(mimikatz|psexec|procdump|lazagne)\.exe</field>
+    <description>OSIRIS : outil offensif exécuté : $(win.eventdata.image)</description>
+    <mitre><id>T1003</id></mitre>
+    <group>suspicious_process,</group>
+  </rule>
+
+  <!-- PowerShell encodé (contournement courant) -->
+  <rule id="100122" level="10">
+    <if_group>windows</if_group>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)powershell.*\-enc(odedcommand)?\s</field>
+    <description>OSIRIS : PowerShell avec commande encodée détecté</description>
+    <mitre><id>T1059.001</id><id>T1027</id></mitre>
+    <group>suspicious_process,</group>
+  </rule>
+
+</group>

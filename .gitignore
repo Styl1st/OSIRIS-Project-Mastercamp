@@ -1,2 +1,19 @@
 # Secrets / credentials — NE JAMAIS COMMIT
-wazuh-insta
+wazuh-install-files.tar
+wazuh-passwords*.txt
+*.pem
+*.key
+*.p12
+.env
+
+# Artefacts d'installation
+wazuh-install.sh
+wazuh-install.log
+*.deb
+*.msi
+*.rpm
+
+# Divers
+*.swp
+.DS_Store
+Thumbs.db
