@@ -13,7 +13,7 @@ INSTALL_OPTS="-a"   # all-in-one. Ajouter " -i" si RAM < 8 Go (ignore les checks
 [[ $EUID -eq 0 ]] || { echo "[ERREUR] Lancer avec sudo." >&2; exit 1; }
 
 RAM_GB=$(free -g | awk '/^Mem:/{print $2}')
-if [[ ${RAM_GB} -lt 7 ]]; then
+if [[ ${RAM_GB} -le 7 ]]; then
   echo "[ATTENTION] ${RAM_GB} Go RAM détectés (<8). Ajout de -i (ignore hardware checks)."
   INSTALL_OPTS="${INSTALL_OPTS} -i"
 fi

@@ -25,17 +25,29 @@ apt-get update -qq
 apt-get upgrade -y -qq
 apt-get install -y -qq curl tar gnupg apt-transport-https openssh-server
 
-echo "[3/5] Configuration IP statique (netplan)"
+echo "[3/5] Configuration IP statique"
 IFACE=$(ip -o -4 route show to default | awk '{print $5}' | head -n1)
+[[ -n "${IFACE}" ]] || IFACE=$(ip -o link show | awk -F': ' '$2!="lo"{print $2; exit}')
 echo "    Interface détectée : ${IFACE}"
 
-# Renderer : NetworkManager si Ubuntu Desktop, networkd si Server
-if systemctl is-active --quiet NetworkManager; then RENDERER="NetworkManager"; else RENDERER="networkd"; fi
-
-cat > /etc/netplan/99-wazuh-static.yaml <<EOF
+if systemctl is-active --quiet NetworkManager; then
+  # Ubuntu Desktop → NetworkManager (nmcli). Ne PAS mélanger avec netplan/networkd.
+  rm -f /etc/netplan/99-wazuh-static.yaml   # nettoyage d'un éventuel essai précédent
+  CON=$(nmcli -t -f NAME,DEVICE connection show --active | awk -F: -v i="${IFACE}" '$2==i{print $1; exit}')
+  [[ -n "${CON}" ]] || CON=$(nmcli -t -f NAME,TYPE connection show | awk -F: '$2=="802-3-ethernet"{print $1; exit}')
+  echo "    Connexion NetworkManager : ${CON}"
+  nmcli connection modify "${CON}" \
+    ipv4.method manual \
+    ipv4.addresses "${STATIC_IP}/${PREFIX}" \
+    ipv4.gateway "${GATEWAY}" \
+    ipv4.dns "${DNS//,/ }"
+  nmcli connection up "${CON}" >/dev/null
+else
+  # Ubuntu Server → netplan/systemd-networkd
+  cat > /etc/netplan/99-wazuh-static.yaml <<EOF
 network:
   version: 2
-  renderer: ${RENDERER}
+  renderer: networkd
   ethernets:
     ${IFACE}:
       dhcp4: false
@@ -46,8 +58,10 @@ network:
       nameservers:
         addresses: [${DNS//,/, }]
 EOF
-chmod 600 /etc/netplan/99-wazuh-static.yaml
-netplan apply
+  chmod 600 /etc/netplan/99-wazuh-static.yaml
+  netplan apply
+fi
+sleep 3
 echo "    IP appliquée : ${STATIC_IP}"
 
 echo "[4/5] Vérification des ressources"
