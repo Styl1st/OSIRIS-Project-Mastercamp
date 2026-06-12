@@ -1,0 +1,15 @@
+# config.yml — Génération des certificats pour le déploiement distribué Wazuh (Phase 2)
+# Utilisé par : sudo bash wazuh-install.sh --generate-config-files
+# Plan IP : docs/architecture/architecture-reseau.md
+nodes:
+  indexer:
+    - name: node-indexer
+      ip: "192.168.195.11"
+
+  server:
+    - name: node-server
+      ip: "192.168.195.134"
+
+  dashboard:
+    - name: node-dashboard
+      ip: "192.168.195.12"

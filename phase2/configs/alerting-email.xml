@@ -1,0 +1,18 @@
+<!-- Alerting email — extrait à intégrer dans /var/ossec/etc/ossec.conf (section <global>)
+     Phase 2 : notification des alertes de niveau >= 10.
+     Pour Gmail/SMTP authentifié, le plus simple est un relais postfix local. -->
+<ossec_config>
+  <global>
+    <email_notification>yes</email_notification>
+    <smtp_server>127.0.0.1</smtp_server>
+    <email_from>wazuh@osiris-project.local</email_from>
+    <email_to>equipe-secu@exemple.fr</email_to>
+    <email_maxperhour>12</email_maxperhour>
+  </global>
+
+  <!-- Seuil global d'envoi email -->
+  <alerts>
+    <log_alert_level>3</log_alert_level>
+    <email_alert_level>10</email_alert_level>
+  </alerts>
+</ossec_config>
