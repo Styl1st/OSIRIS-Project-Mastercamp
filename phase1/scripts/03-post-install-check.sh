@@ -7,8 +7,8 @@ set -uo pipefail
 [[ $EUID -eq 0 ]] || { echo "[ERREUR] Lancer avec sudo." >&2; exit 1; }
 
 PASS=0; FAIL=0
-ok()   { echo "  [OK]   $1"; ((PASS++)); }
-ko()   { echo "  [FAIL] $1"; ((FAIL++)); }
+ok()   { echo "  [OK]   $1"; PASS=$((PASS+1)); }
+ko()   { echo "  [FAIL] $1"; FAIL=$((FAIL+1)); }
 
 echo "=== 1. Services ==="
 for svc in wazuh-manager wazuh-indexer wazuh-dashboard filebeat; do
