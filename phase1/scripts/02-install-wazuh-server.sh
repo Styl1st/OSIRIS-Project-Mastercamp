@@ -23,7 +23,8 @@ echo "[1/3] Téléchargement de l'assistant d'installation Wazuh ${WAZUH_VERSION
 curl -sO "https://packages.wazuh.com/${WAZUH_VERSION}/wazuh-install.sh"
 
 echo "[2/3] Installation all-in-one (manager + indexer + dashboard)…"
-bash ./wazuh-install.sh ${INSTALL_OPTS}
+# "$@" transmet les options passées au script (ex: -o pour écraser une install existante).
+bash ./wazuh-install.sh ${INSTALL_OPTS} "$@"
 
 echo "[3/3] Extraction des identifiants"
 echo "============================================================"
