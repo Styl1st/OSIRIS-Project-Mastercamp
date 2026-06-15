@@ -14,6 +14,8 @@ AGENT_GROUP="${AGENT_GROUP:-linux}"
 [[ $EUID -eq 0 ]] || { echo "[ERREUR] Lancer avec sudo." >&2; exit 1; }
 
 echo "[1/3] Ajout du dépôt Wazuh"
+# Dépendances minimales (souvent absentes sur une install Ubuntu minimale)
+apt-get update -qq && apt-get install -y -qq curl gnupg
 curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | gpg --dearmor -o /usr/share/keyrings/wazuh.gpg --yes
 echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" \
   > /etc/apt/sources.list.d/wazuh.list
