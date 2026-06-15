@@ -4,7 +4,7 @@
 # A lancer sur le SERVEUR Wazuh (manager), apres 02 et 03.
 #
 # Ce script :
-#   1. cree les groupes d'agents ("linux", "windows") sur le manager ;
+#   1. cree les groupes d'agents ("linux", "windows") s'ils n'existent pas ;
 #   2. deploie la conf partagee configs/shared-agent-<groupe>.conf
 #      dans /var/ossec/etc/shared/<groupe>/agent.conf (FIM, collecte de logs...) ;
 #   3. laisse le manager distribuer la conf aux agents.
@@ -12,12 +12,17 @@
 # Sans ces groupes, l'enrolement d'un agent echoue avec :
 #   "ERROR: Invalid group: linux. Unable to add agent (from manager)"
 #
-# Idempotent : relancable sans risque (ne recree pas un groupe deja present).
+# NB : un groupe = un dossier sous /var/ossec/etc/shared/. On n'attend que le
+#      manager soit pret QUE si l'on doit reellement creer un groupe (la creation
+#      passe par agent_groups, qui exige que les demons soient prets — erreur 1017
+#      sinon, et modulesd peut mettre 1-3 min a demarrer au 1er lancement).
+#
+# Idempotent : relancable sans risque.
 # Usage : sudo bash 05-setup-agent-groups.sh
 # =============================================================================
 set -euo pipefail
 
-# --- Groupes a creer (doivent correspondre a configs/shared-agent-<groupe>.conf) ---
+# --- Groupes a gerer (doivent correspondre a configs/shared-agent-<groupe>.conf) ---
 GROUPS=(linux windows)
 
 OSSEC_BIN="/var/ossec/bin"
@@ -34,44 +39,41 @@ CONFIG_DIR="${SCRIPT_DIR}/../configs"
   exit 1
 }
 
-# --- 1. Le manager doit etre pret (agent_groups renvoie l'erreur 1017 sinon) ---
-# NB : wazuh-modulesd peut mettre 30-60 s a demarrer (telechargement des flux CVE
-#      au 1er lancement) — on attend donc activement, jusqu'a 90 s.
-echo "[1/4] Verification de l'etat du manager"
-wait_modulesd() {
-  local tries=18   # 18 x 5 s = 90 s max
-  local i
-  for ((i=1; i<=tries; i++)); do
-    "${OSSEC_BIN}/wazuh-control" status | grep -q "wazuh-modulesd is running" && return 0
-    sleep 5
-  done
-  return 1
-}
-if ! "${OSSEC_BIN}/wazuh-control" status | grep -q "wazuh-modulesd is running"; then
-  echo "      wazuh-modulesd pas encore pret -> redemarrage du manager et attente (jusqu'a 90 s)..."
-  systemctl restart wazuh-manager
-fi
-if wait_modulesd; then
-  echo "      [OK] manager pret (wazuh-modulesd running)."
-else
-  echo "[ERREUR] wazuh-modulesd ne demarre pas apres 90 s." >&2
-  echo "         Voir : sudo tail -n 50 /var/ossec/logs/ossec.log" >&2
-  exit 1
-fi
-
-# --- 2. Creation des groupes (idempotent) ---
-echo "[2/4] Creation des groupes"
-existing="$("${OSSEC_BIN}/agent_groups" -l 2>/dev/null || true)"
+# --- 1. Quels groupes manquent ? (presence du dossier sous shared/) ---
+echo "[1/3] Verification des groupes existants"
+missing=()
 for g in "${GROUPS[@]}"; do
-  if echo "${existing}" | grep -qw "${g}"; then
+  if [[ -d "${SHARED_DIR}/${g}" ]]; then
     echo "      [SKIP] groupe '${g}' deja present"
   else
-    "${OSSEC_BIN}/agent_groups" -a -g "${g}" -q && echo "      [OK]   groupe '${g}' cree"
+    missing+=("${g}")
   fi
 done
 
-# --- 3. Deploiement des configs partagees ---
-echo "[3/4] Deploiement des configurations partagees (agent.conf)"
+# --- 2. Creation des groupes manquants (necessite un manager pret) ---
+if (( ${#missing[@]} > 0 )); then
+  echo "[2/3] Creation des groupes manquants : ${missing[*]}"
+  echo "      Attente que le manager reponde (modulesd peut mettre 1-3 min au 1er demarrage)..."
+  ready=0
+  for ((i=1; i<=36; i++)); do          # 36 x 5 s = 180 s max
+    if "${OSSEC_BIN}/agent_groups" -l >/dev/null 2>&1; then ready=1; break; fi
+    sleep 5
+  done
+  if (( ready == 0 )); then
+    echo "[ERREUR] Le manager ne repond pas apres 180 s." >&2
+    echo "         Verifier : sudo ${OSSEC_BIN}/wazuh-control status" >&2
+    echo "                    sudo tail -n 50 /var/ossec/logs/ossec.log" >&2
+    exit 1
+  fi
+  for g in "${missing[@]}"; do
+    "${OSSEC_BIN}/agent_groups" -a -g "${g}" -q && echo "      [OK]   groupe '${g}' cree"
+  done
+else
+  echo "[2/3] Tous les groupes existent deja — pas d'attente du manager necessaire."
+fi
+
+# --- 3. Deploiement des configs partagees (simple copie de fichiers) ---
+echo "[3/3] Deploiement des configurations partagees (agent.conf)"
 for g in "${GROUPS[@]}"; do
   src="${CONFIG_DIR}/shared-agent-${g}.conf"
   dst_dir="${SHARED_DIR}/${g}"
@@ -86,16 +88,10 @@ for g in "${GROUPS[@]}"; do
   fi
 done
 
-# --- 4. Application de la conf ---
-# Pas besoin de redemarrer le manager : il detecte les changements dans
-# /var/ossec/etc/shared/ et pousse automatiquement la conf aux agents du groupe.
-echo "[4/4] Configurations en place (distribution automatique aux agents du groupe)."
-
 IP="$(hostname -I | awk '{print $1}')"
 echo ""
 echo "============================================================"
-echo " Groupes disponibles :"
-"${OSSEC_BIN}/agent_groups" -l | sed 's/^/   /'
+echo " Groupes prets : ${GROUPS[*]}"
 echo "============================================================"
 echo ""
 echo "Etape suivante — installer un agent (sur CHAQUE machine cliente) :"
