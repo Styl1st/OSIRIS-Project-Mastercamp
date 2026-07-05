@@ -136,9 +136,99 @@ hydra -t 4 -l ubuntu -P /tmp/wl.txt ssh://192.168.195.131
 
 ---
 
-## 4. Cluster & load balancing / autres intégrations
+## 4. Cluster multi-nœuds + load balancing
 
-_À compléter (IDS Suricata, cloud, Active Directory…)._
+**Ce qu'on démontre :** l'architecture **d'entreprise** de la Phase 3 — plusieurs nœuds managers en cluster (haute disponibilité), un cluster d'indexers (stockage réparti/répliqué), et un **load balancer** qui distribue les agents. Objectifs : scalabilité et résilience.
+
+**Topologie déployée** (via `wazuh-docker/multi-node`) : 2 managers (`master` + `worker`), 3 indexers OpenSearch, 1 dashboard, 1 **NGINX** (LB sur le port agents 1514).
+
+**Adaptation RAM (lab) :** heap de chaque indexer réduit à 512 Mo pour tenir dans ~10 Go :
+
+```bash
+sed -i 's|OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g|OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m|g' docker-compose.yml
+```
+
+**Déploiement :**
+
+```bash
+cd ~/wazuh-docker/multi-node
+sudo sysctl -w vm.max_map_count=262144
+docker compose -f generate-indexer-certs.yml run --rm generator   # certificats du cluster
+docker compose up -d                                              # 7 conteneurs
+```
+
+**Vérifications (les preuves pour le rapport) :**
+
+```bash
+# Cluster de managers Wazuh -> master + worker
+docker exec multi-node-wazuh.master-1 /var/ossec/bin/cluster_control -l
+
+# Cluster d'indexers -> 3 noeuds, sante "green"
+curl -k -u admin:SecretPassword "https://localhost:9200/_cluster/health?pretty" | grep -E '"status"|"number_of_nodes"'
+```
+
+**Résultat obtenu :** cluster de 2 managers (`manager`/`worker01`) + cluster de 3 indexers **green** + NGINX répartissant les agents sur `wazuh.master` et `wazuh.worker`. Dashboard accessible via `https://<IP>`.
+
+**Load balancing :** les agents pointent vers `NGINX:1514` (pas un manager précis) ; NGINX distribue les connexions sur les managers du cluster. Ajouter un agent (`WAZUH_MANAGER=<IP-nginx>`) le fait remonter dans le cluster.
+
+**À dire :** *« On passe d'un serveur unique à une architecture d'entreprise : plusieurs managers en cluster derrière un load balancer, avec un stockage répliqué sur 3 indexers. Si un nœud tombe, le service continue — c'est la haute disponibilité et la scalabilité attendues d'un SIEM en production. »*
+
+> **Note conception (rapport) :** en production on garderait 1-2 Go de heap par indexer et on dédierait chaque nœud à une machine/VM. La version conteneurs sur un seul hôte démontre l'architecture ; la doc peut décrire la cible distribuée réelle.
+
+---
+
+## 5. IDS réseau — Suricata
+
+**Ce qu'on démontre :** on ajoute une **détection au niveau réseau** (IDS) en plus de la détection sur les endpoints. Suricata analyse le trafic, reconnaît les signatures d'attaques (règles Emerging Threats), et ses alertes sont **ingérées par Wazuh** (décodeurs Suricata natifs).
+
+**Comment ça marche :** Suricata écoute sur l'interface réseau → écrit ses alertes en JSON (`/var/log/suricata/eve.json`) → l'agent Wazuh lit ce fichier → le manager applique ses règles Suricata (groupe `ids`).
+
+**Installation & config (sur l'agent, ex. `srv-linux`) :**
+
+```bash
+sudo apt update && sudo apt install -y suricata
+sudo suricata-update                                          # regles ET Open (~51k signatures)
+sudo sed -i 's/interface: eth0/interface: ens33/g' /etc/suricata/suricata.yaml   # ecouter sur la bonne interface
+sudo suricata -T -c /etc/suricata/suricata.yaml -v            # tester la config
+sudo systemctl enable --now suricata                          # demarrer l'IDS
+```
+
+**Brancher `eve.json` à l'agent Wazuh** (`/var/ossec/etc/ossec.conf`) :
+
+```xml
+<ossec_config>
+  <localfile>
+    <log_format>json</log_format>
+    <location>/var/log/suricata/eve.json</location>
+  </localfile>
+</ossec_config>
+```
+
+Puis `sudo systemctl restart wazuh-agent`.
+
+**Test (attaque réseau simulée) — le test NIDS standard :**
+
+```bash
+curl http://testmynids.org/uid/index.html    # renvoie "uid=0(root)..." -> signature IDS
+```
+
+**Où vérifier :**
+- Suricata : `sudo grep '"event_type":"alert"' /var/log/suricata/eve.json | tail`
+- Wazuh (manager) : `docker exec single-node-wazuh.manager-1 grep -i suricata /var/ossec/logs/alerts/alerts.log | tail`
+
+**Résultat obtenu :** Suricata détecte `GPL ATTACK_RESPONSE id check returned root` (SID 2100498) → Wazuh lève la règle **86601** (groupe `ids,suricata`). Bonus : Suricata a aussi détecté la requête DHCP de la machine Kali (`ET INFO Possible Kali Linux hostname`).
+
+**À dire :** *« On combine deux niveaux de détection : les agents surveillent les machines, et Suricata surveille le réseau. Une attaque réseau est détectée par l'IDS et centralisée dans le SIEM, corrélable avec le reste. »*
+
+---
+
+## 6. Endpoint behavior analytics & autres intégrations (conception)
+
+Pistes documentées pour compléter (implémentation partielle possible selon le temps) :
+
+- **Endpoint behavior analytics** : **Sysmon** sur l'agent Windows (la config partagée `windows` inclut déjà le canal `Microsoft-Windows-Sysmon/Operational`) → détection de créations de processus, connexions réseau et injections suspectes.
+- **Cloud** : modules wodle `aws-s3` / `azure-logs` / `gcp-pubsub` pour ingérer les logs cloud.
+- **Active Directory** : agent Wazuh sur un contrôleur de domaine → collecte des Event Channels de sécurité AD.
 
 ---
 
